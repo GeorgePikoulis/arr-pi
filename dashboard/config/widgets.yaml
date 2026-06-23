@@ -1,0 +1,23 @@
+# widgets.yaml — top information strip.
+#
+# Addressing rule: http://100.115.36.108:<port>  (Tailscale host IP, NO trailing
+# slash — a trailing "/" breaks widgets, the #1 cause of "API Error").
+
+- glances:
+    url: http://100.115.36.108:61208
+    # VERIFY ON BOX: must match the running Glances MAJOR version. `version` is
+    # required only for Glances v4+ (defaults to 3 if omitted). Check with:
+    #   docker exec glances glances --version   (or the container's image tag)
+    # then set 3 or 4 accordingly. Set to 4 here as the likely current value.
+    version: 4
+    cpu: true
+    mem: true
+    cputemp: true
+    disk: /
+
+- datetime:
+    text_size: xl
+    format:
+      dateStyle: long
+      timeStyle: short
+      hourCycle: h23

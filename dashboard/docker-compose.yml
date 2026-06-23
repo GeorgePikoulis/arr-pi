@@ -1,0 +1,41 @@
+# Portainer stack: `dashboard` — Homepage (gethomepage)
+#
+# Single service, arm64. Socket-FREE by decision (no /var/run/docker.sock mount):
+# we use service widgets + ping, not container discovery.
+#
+# Secrets are NOT inlined here. The HOMEPAGE_VAR_* values are supplied via
+# Portainer's stack "Environment variables" editor (or an .env file) and injected
+# into the container, then referenced in services.yaml as {{HOMEPAGE_VAR_NAME}}.
+# See .env.example and README.md in this directory.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: homepage
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: Europe/Athens
+      # Required, else Homepage refuses connections. Comma-separated host:port,
+      # no spaces. Add 10.0.69.x:3000 after the office->home move.
+      HOMEPAGE_ALLOWED_HOSTS: "100.115.36.108:3000,10.0.1.59:3000"
+      # --- widget auth secrets (env-var substitution; see .env.example) ---
+      HOMEPAGE_VAR_JELLYFIN_KEY: ${HOMEPAGE_VAR_JELLYFIN_KEY}
+      HOMEPAGE_VAR_JELLYSEERR_KEY: ${HOMEPAGE_VAR_JELLYSEERR_KEY}
+      HOMEPAGE_VAR_QBIT_USERNAME: ${HOMEPAGE_VAR_QBIT_USERNAME}
+      HOMEPAGE_VAR_QBIT_PASSWORD: ${HOMEPAGE_VAR_QBIT_PASSWORD}
+      HOMEPAGE_VAR_SONARR_KEY: ${HOMEPAGE_VAR_SONARR_KEY}
+      HOMEPAGE_VAR_RADARR_KEY: ${HOMEPAGE_VAR_RADARR_KEY}
+    volumes:
+      # Owned 1000:1000 on the host (chown before first start).
+      - /opt/homepage:/app/config
+    logging: *default-logging
