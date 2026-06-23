@@ -70,9 +70,8 @@
         widget:
           type: uptimekuma
           url: http://100.115.36.108:3001
-          # CHANGE ME: the published status-page slug (lower-case, the part after
-          # /status/). Create the status page in Kuma FIRST (see README step 1).
-          slug: CHANGEME-kuma-status-slug
+          # Published Kuma status-page slug (the part after /status/).
+          slug: dashboard
           fields: ["up", "down", "uptime", "incident"]
     - Scrutiny:
         href: http://100.115.36.108:8082

@@ -33,11 +33,12 @@ dashboard/
 
 I built the config from here, but these require box/app access and your secrets:
 
-1. **Kuma status page (do FIRST — services.yaml needs the slug).** Uptime Kuma → Status Pages →
-   create **one published** status page. Add **all** monitors into a single group: the 7 HTTP
-   monitors + the `pi-arr gluetun (VPN)` Docker-Container monitor + the `pi-arr disk space` Push
-   monitor. Publish, then note the **slug** (lower-case, the part after `/status/`). Put it in
-   `config/services.yaml` → Uptime Kuma → `slug:` (replace `CHANGEME-kuma-status-slug`).
+1. **Kuma status page.** Slug is set to **`dashboard`** (`/status/dashboard`) in
+   `config/services.yaml`. The page exists but is **empty for now** — until you add monitors to
+   it the rollup tile reads 0 up / 0 down. To make it show real counts: Uptime Kuma → Status
+   Pages → `dashboard` → add **all** monitors into a single group (the 7 HTTP monitors + the
+   `pi-arr gluetun (VPN)` Docker-Container monitor + the `pi-arr disk space` Push monitor), then
+   **publish**.
 2. **Verify port 3000 is free** on the host (should be): `sudo ss -ltnp | grep ':3000'` → no output.
 3. **Create `/opt/homepage` owned by 1000:1000:**
    `sudo mkdir -p /opt/homepage && sudo chown -R 1000:1000 /opt/homepage`, then drop
