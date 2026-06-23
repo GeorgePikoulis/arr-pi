@@ -1,6 +1,6 @@
 # pi-arr — system inventory
  
-Reference snapshot of the media server as built. Last updated: 2026-06-22.
+Reference snapshot of the media server as built. Last updated: 2026-06-23.
 Secrets (VPN keys, app passwords/API keys) are intentionally **not** stored here — they
 live in the gluetun environment and each app's config volume.
  
@@ -273,6 +273,52 @@ user-facing and stay **off** the VPN.
   *pending* and never alerted.
 ---
  
+## Stack: `dashboard`
+ 
+Homepage (`gethomepage`) landing dashboard — a single info strip + service tiles for the whole
+box. Added 2026-06-23. **Socket-free by decision:** no `docker.sock` mount — it uses service
+widgets + ping, **not** container discovery (so it never gets Docker-daemon control, unlike
+Kuma/Portainer). Authoring source for the compose + the two config YAMLs is in this repo under
+`dashboard/` (see `dashboard/README.md`); on the box the stack lives in Portainer and the YAMLs
+live in `/opt/homepage`.
+ 
+### Homepage
+- Image: `ghcr.io/gethomepage/homepage:latest` (arm64 supported). New Portainer stack `dashboard`,
+  single service.
+- `PUID/PGID=1000`, `TZ=Europe/Athens`, `restart: unless-stopped`, the shared log cap
+  (`json-file`, `max-size: 10m`, `max-file: 3`).
+- Port **3000:3000** (verified free on the host first).
+- Volume `/opt/homepage:/app/config`, owned `1000:1000`. YAML-only (no DB).
+- **`HOMEPAGE_ALLOWED_HOSTS` (required — Homepage refuses connections without it):**
+  comma-separated `host:port`, no spaces. Currently `100.115.36.108:3000,10.0.1.59:3000`
+  (Tailscale + current LAN); **add `10.0.69.x:3000` after the office→home move.**
+- **Addressing rule (every widget + link):** `http://100.115.36.108:<port>` — Tailscale host IP,
+  **never** container names, and **no trailing slash** (a trailing `/` breaks widgets — the #1
+  cause of "API Error").
+- **Secrets:** kept out of the YAML via Homepage's env-var substitution — values injected as
+  `HOMEPAGE_VAR_*` (stack env) and referenced as `{{HOMEPAGE_VAR_NAME}}`. They live only on the
+  box (Portainer stack env). If ever inlined instead, `chmod 600` the YAMLs like the Scrutiny one.
+### `widgets.yaml` (top info strip)
+- **Glances** info widget at `http://100.115.36.108:61208`, showing `cpu`, `mem`, `cputemp`,
+  `disk: /`. The `version` field **must match the running Glances major version** (required for
+  v4+, defaults to 3 if omitted) — set per the container, don't assume.
+- A **datetime** widget.
+### `services.yaml` groups
+- **Media** — Jellyfin (`type: jellyfin`, **new** API key created in Jellyfin → Dashboard →
+  Advanced → API Keys), Jellyseerr (`type: jellyseerr`, key from Settings → General).
+- **Acquisition** — qBittorrent (`type: qbittorrent`, WebUI **username + password**, not a key),
+  Sonarr/Radarr (`type: sonarr`/`radarr`, existing API keys), Prowlarr + Bazarr as plain links
+  with a `ping` status dot. (NB: `ping` targets the host IP, so it confirms the Pi is reachable,
+  not the app itself — all the VPN-gated apps share this one published host IP.)
+- **Operations** — Uptime Kuma rollup (`type: uptimekuma`, `url: …:3001`, `slug:` = the published
+  status-page slug, `fields: ["up","down","uptime","incident"]`), Scrutiny (`type: scrutiny`,
+  `url: …:8082`, no key), Portainer as a link.
+### Kuma prerequisite
+- A single **published** Uptime Kuma status page backs the rollup tile: all monitors (7 HTTP + the
+  `pi-arr gluetun (VPN)` Docker-Container monitor + the `pi-arr disk space` Push monitor) in one
+  group; the tile reads that page via its slug.
+---
+ 
 ## Logging / log rotation (all containers)
  
 Per-service log caps so container logs can't fill the root partition (roadmap #3, 2026-06-19).
@@ -289,7 +335,7 @@ Chose compose-level `logging:` over `/etc/docker/daemon.json` deliberately — s
   ```
 - **Portainer (standalone):** can't take a stack `logging:` block, so the same caps are
   `docker run` flags (`--log-opt max-size=10m --log-opt max-file=3`) — see the Portainer table.
-- Result: all 13 containers cap at 10 MB × 3 = 30 MB each (~390 MB worst case).
+- Result: all 14 containers cap at 10 MB × 3 = 30 MB each (~420 MB worst case).
 - **Why not `daemon.json`:** (1) daemon log-opts apply only to **newly created** containers and
   need a full **daemon restart** to load — and a daemon restart force-cycles gluetun, with the
   namespace apps **not** ordered by `depends_on` (that's Compose-only, not honoured on daemon
@@ -368,6 +414,11 @@ daemon). Roadmap item #1; restore verified to scratch and over live.
  
 ### What's captured
 - `/opt/arr` — all app configs.
+- `/opt/homepage` — the Homepage dashboard config (YAML-only). **Added to the include set
+  2026-06-23** when the `dashboard` stack was built — it sits outside `/opt/arr`, so it had to be
+  added explicitly to the script's path list or it wouldn't be captured. `--group-by host`
+  retention absorbs the changed path-set automatically. YAML-only (no DB), so it does **not** join
+  the pre-backup container-stop list — safe to snapshot live.
 - `/var/lib/docker/volumes/portainer_data/_data` — the Portainer volume, which holds the
   **stack definitions** at `compose/<id>/docker-compose.yml`. Because the compose was pasted
   into Portainer's editor, the gluetun **WireGuard secret is inline in there** — this is the
@@ -431,6 +482,7 @@ the VPN is running). Recreate the two stacks from the restored compose files, re
 /opt/arr/{gluetun,qbittorrent,prowlarr,sonarr,radarr,bazarr,jellyfin,jellyseerr}
 /opt/scrutiny/{config,influxdb}                    # config/ holds scrutiny.yaml (notify config, 600)
 /opt/uptime-kuma                                   # Uptime Kuma data (SQLite kuma.db + history)
+/opt/homepage                                      # Homepage dashboard config (widgets.yaml, services.yaml; owned 1000:1000)
  
 # off-box backup machinery (host-level)
 /usr/local/sbin/pi-arr-backup.sh                   # backup wrapper (root, 700)
@@ -460,6 +512,7 @@ the VPN is running). Recreate the two stacks from the restored compose files, re
 | Service | Port | Notes |
 |---------|------|-------|
 | Portainer | 9443 | HTTPS |
+| Homepage | 3000 | landing dashboard (`dashboard` stack) |
 | Jellyfin | 8096 | media playback |
 | Jellyseerr | 5055 | requests / discovery |
 | qBittorrent | 8080 | behind VPN (published on gluetun) |
@@ -481,6 +534,15 @@ the VPN is running). Recreate the two stacks from the restored compose files, re
   - Prowlarr → Sonarr & Radarr
   - Bazarr → Sonarr & Radarr
   - Jellyseerr → Sonarr & Radarr
+  - Homepage → Sonarr & Radarr (read-only widget queries; reuses the existing keys)
+- **Jellyfin API key (Homepage)** — a **new** key created in Jellyfin → Dashboard → Advanced →
+  API Keys for the Homepage `jellyfin` widget (the box's first Jellyfin API key; Jellyseerr uses
+  Jellyfin's auth, not an API key). Revoke/regenerate from the same screen.
+- **Homepage widget secrets** — Jellyfin/Jellyseerr/Sonarr/Radarr keys + the qBittorrent WebUI
+  username/password are kept out of the YAML via env-var substitution: injected as `HOMEPAGE_VAR_*`
+  through the `dashboard` Portainer stack env and referenced as `{{HOMEPAGE_VAR_NAME}}` in
+  `/opt/homepage/services.yaml`. They live only on the box (Portainer stack env). No new external
+  credential — they're copies/uses of keys already documented above.
 - VPN credentials: in the gluetun service environment (WireGuard keys/addresses).
 - Notification email (Scrutiny + Uptime Kuma + host msmtp): a Gmail **app password** (2FA
   enabled). Three on-box copies, by necessity: inline in the shoutrrr URL in

@@ -1,0 +1,86 @@
+# services.yaml
+#
+# Addressing rule for EVERY widget/link: http://100.115.36.108:<port>
+#   - Tailscale host IP, never container names.
+#   - NO trailing slash (a trailing "/" breaks widgets -> "API Error").
+# Secrets are injected via the stack env (HOMEPAGE_VAR_*) and referenced as
+# {{HOMEPAGE_VAR_NAME}} — no plaintext keys in this file.
+
+- Media:
+    - Jellyfin:
+        href: http://100.115.36.108:8096
+        description: Media playback
+        siteMonitor: http://100.115.36.108:8096
+        widget:
+          type: jellyfin
+          url: http://100.115.36.108:8096
+          key: {{HOMEPAGE_VAR_JELLYFIN_KEY}}
+          enableBlocks: true
+          enableNowPlaying: true
+    - Jellyseerr:
+        href: http://100.115.36.108:5055
+        description: Requests & discovery
+        siteMonitor: http://100.115.36.108:5055
+        widget:
+          type: jellyseerr
+          url: http://100.115.36.108:5055
+          key: {{HOMEPAGE_VAR_JELLYSEERR_KEY}}
+
+- Acquisition:
+    - qBittorrent:
+        href: http://100.115.36.108:8080
+        description: Torrent client (behind VPN)
+        siteMonitor: http://100.115.36.108:8080
+        widget:
+          type: qbittorrent
+          url: http://100.115.36.108:8080
+          username: {{HOMEPAGE_VAR_QBIT_USERNAME}}
+          password: {{HOMEPAGE_VAR_QBIT_PASSWORD}}
+    - Sonarr:
+        href: http://100.115.36.108:8989
+        description: TV automation (behind VPN)
+        siteMonitor: http://100.115.36.108:8989
+        widget:
+          type: sonarr
+          url: http://100.115.36.108:8989
+          key: {{HOMEPAGE_VAR_SONARR_KEY}}
+    - Radarr:
+        href: http://100.115.36.108:7878
+        description: Movie automation (behind VPN)
+        siteMonitor: http://100.115.36.108:7878
+        widget:
+          type: radarr
+          url: http://100.115.36.108:7878
+          key: {{HOMEPAGE_VAR_RADARR_KEY}}
+    - Prowlarr:
+        href: http://100.115.36.108:9696
+        description: Indexers (behind VPN)
+        # Plain link + status dot. NB: ping targets the host IP, so it confirms
+        # the Pi is reachable, not the app itself (all apps share this host IP).
+        ping: 100.115.36.108
+    - Bazarr:
+        href: http://100.115.36.108:6767
+        description: Subtitles (behind VPN)
+        ping: 100.115.36.108
+
+- Operations:
+    - Uptime Kuma:
+        href: http://100.115.36.108:3001
+        description: Service up/down rollup
+        widget:
+          type: uptimekuma
+          url: http://100.115.36.108:3001
+          # CHANGE ME: the published status-page slug (lower-case, the part after
+          # /status/). Create the status page in Kuma FIRST (see README step 1).
+          slug: CHANGEME-kuma-status-slug
+          fields: ["up", "down", "uptime", "incident"]
+    - Scrutiny:
+        href: http://100.115.36.108:8082
+        description: NVMe SMART health
+        siteMonitor: http://100.115.36.108:8082
+        widget:
+          type: scrutiny
+          url: http://100.115.36.108:8082
+    - Portainer:
+        href: https://100.115.36.108:9443
+        description: Container management
