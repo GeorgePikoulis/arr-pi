@@ -63,6 +63,33 @@ nudge arr custom formats to prefer releases carrying AC3/E-AC3/AAC over DTS-only
 optimization; current behaviour is harmless.
  
 ---
+
+## [x] 2. Jellyfin won't prune a deleted title when its library folder goes completely empty — RESOLVED (2026-06-26): empty-folder safety guard; fixed with a `.keep` sentinel
+
+**Seen (2026-06-26):** Amélie (the only movie) was deleted at the filesystem level
+(deliberate — consume-and-delete). `ls /data/media/movies` was empty and Radarr showed no
+movies, yet Jellyfin still showed Amélie on Home (My Media / Continue Watching / Recently
+Added) and its full detail page. The scheduled **Scan Media Library** task had already run
+~17 h earlier — *after* the deletion — and had not removed it. So "the next scan will
+prune it" was wrong; a scan had already run and the item survived.
+
+**Root cause:** Jellyfin's empty-folder protection. When a library's root folder is
+**completely empty**, the scanner skips it and refuses to prune the items that used to live
+there — by design, so an unmounted/unavailable volume doesn't wipe the library (losing watch
+progress/metadata). "Folder has zero items" is indistinguishable from "the mount fell off,"
+so it errs toward keeping the DB rows. Confirmed against current Jellyfin issues/docs, not
+just inferred. This is why scan *frequency* is irrelevant: the scan itself declines to touch
+an empty folder regardless of cadence.
+
+Why it bites this box specifically: the consume-and-delete model regularly drains a library
+to **zero** items. A library with other titles still in it prunes a single deletion fine
+(root isn't empty); the guard triggers only on drain-to-empty — exactly the recurring
+end-state here.
+
+**Fix (applied):** a permanent sentinel file at each library root so the folder is **never**
+completely empty:
+
+---
  
 <details>
 <summary>Original investigation note (kept for the record — hypothesis was wrong, see resolution above)</summary>
