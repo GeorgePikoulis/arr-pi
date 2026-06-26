@@ -164,6 +164,18 @@ user-facing and stay **off** the VPN.
 - Volumes: `/opt/arr/jellyfin:/config`, `/data/media:/data/media:ro`
 - No hardware transcoding (Pi 5 has no HW encoder). Configured/used for **direct play** —
   set clients to Original quality.
+- **`.keep` sentinel files at each library root** (`/data/media/movies/.keep`,
+  `/data/media/tv/.keep`, added 2026-06-26): keep the library folders from ever being
+  *completely* empty. Jellyfin's scanner **skips an empty library root and won't prune**
+  deleted titles (empty-folder safety guard — treats zero-items as a possibly-unmounted
+  volume, to avoid wiping the library on a mount failure). The consume-and-delete model
+  drains libraries to zero regularly, so without the sentinel a drained library keeps showing
+  ghost entries no matter how often the scan runs. Dotfile → not parsed as media. Created
+  host-side (`/data/media` is rw there; the container mount is `:ro`). See ISSUES.md #2.
+- **Library reconciler = the scheduled `Scan Media Library` task**, not real-time monitoring
+  (inotify is unreliable for deletions over bind mounts). Deletions surface on the next
+  scheduled scan — given the `.keep` sentinel above, which is what makes that reliable on the
+  empty-folder edge case.  
 ### Jellyseerr (NOT behind VPN)
 - Image: `fallenbagel/jellyseerr:latest`
 - Env: `LOG_LEVEL=info`, `TZ=Europe/Athens`. Port **5055**. Runs internally as uid 1000.
