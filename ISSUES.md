@@ -89,6 +89,31 @@ end-state here.
 **Fix (applied):** a permanent sentinel file at each library root so the folder is **never**
 completely empty:
 
+```
+touch /data/media/movies/.keep
+touch /data/media/tv/.keep
+```
+
+Created host-side (`/data/media` is read-write there; only Jellyfin's mount is `:ro`). A
+dotfile isn't parsed as media, so it creates no phantom item. With the folder non-empty, the
+next scan walks it, sees the title's subfolder is gone, and removes the entry. **Verified:**
+a scan after adding `.keep` cleared Amélie. The sentinel is durable — future drain-to-zero
+now prunes cleanly on the scheduled scan with no intervention.
+
+**Secondary quirk — orphaned library tile image:** after the item was pruned, the **Movies**
+library tile kept showing Amélie's artwork. Jellyfin auto-derives a library's image from one
+of the items inside it and stores that reference in the *library's* own metadata (not the
+item's), so pruning the item didn't re-evaluate it — the tile pointed at art whose source no
+longer existed. Cleared via Movies library → **Edit Images**. Optional hardening: pin a
+static library image so it stops auto-deriving from whatever item happens to be inside (then
+a drain-to-zero leaves no orphaned tile). Cosmetic only.
+
+**Related (don't re-chase):** real-time monitoring (inotify) is unreliable for *deletions*,
+especially over Docker bind mounts — the scheduled **Scan Media Library** task is the
+dependable reconciler, *except* in the empty-folder case above, which no scan frequency
+fixes. The `.keep` sentinel is what makes the scheduled scan reliable for the
+consume-and-delete loop.
+
 ---
  
 <details>
