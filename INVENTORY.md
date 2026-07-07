@@ -43,16 +43,26 @@ live in the gluetun environment and each app's config volume.
   bootstrap drive during install and is not part of the running server.)
 ---
  
-## Portainer (standalone container, not a stack)
- 
+## Portainer (compose-managed, `/opt/portainer`)
+
+Migrated 2026-07-07 from a standalone `docker run` container to a compose stack — same
+container, same `portainer_data` volume (marked `external: true` so compose reuses it rather
+than creating a new namespaced one), same log caps, now declared in a file instead of
+memorized run-flags. Motivation: every other service updates via `docker compose pull &&
+up -d`; Portainer was the one exception, since nothing on disk recorded its launch config
+(almost certainly because it was the first thing installed, before anything existed to
+manage it as a stack).
+
 | Field | Value |
 |-------|-------|
-| Image | `portainer/portainer-ce:latest` |
-| Run | `docker run` (not a compose stack) |
-| Ports | 8000 (agent tunnel), 9443 (HTTPS UI) |
-| Volume | `portainer_data:/data` + `/var/run/docker.sock` |
+| Image | `portainer/portainer-ce:latest` (currently 2.39.4 LTS) |
+| Compose file | `/opt/portainer/docker-compose.yml` — a standalone file, **not** under `/opt/arr` and **not** a Portainer-managed stack (Portainer doesn't self-host its own compose lifecycle) |
+| Network | `network_mode: bridge`, set explicitly — the plain default Docker bridge, matching what `docker inspect` showed pre-migration. Pinned so `docker compose up` doesn't silently move it to a project-specific network instead. |
+| Ports | 8000 (agent tunnel, published but unused), 9443 (HTTPS UI) |
+| Volume | `portainer_data:/data` (external — pre-existing volume, holds the stack definitions incl. the inline gluetun WireGuard secret) + `/var/run/docker.sock` bind |
 | Restart | always |
-| Logging | json-file, `--log-opt max-size=10m --log-opt max-file=3` (set 2026-06-19; standalone container can't take a stack `logging:` block, so the caps are run-flags — re-add them if ever recreated) |
+| Logging | json-file, `max-size: 10m` / `max-file: 3` — now a compose `logging:` block instead of run-flags, so the caps survive a recreate without having to be retyped |
+| Update | `cd /opt/portainer && docker compose pull && docker compose up -d` — same pattern as every other service now |
  
 ---
  
@@ -473,6 +483,13 @@ daemon). Roadmap item #1; restore verified to scratch and over live.
   added explicitly to the script's path list or it wouldn't be captured. `--group-by host`
   retention absorbs the changed path-set automatically. YAML-only (no DB), so it does **not** join
   the pre-backup container-stop list — safe to snapshot live.
+- `/opt/portainer` — the Portainer compose file (YAML-only, one file). **Added to the include
+  set 2026-07-07** when Portainer was migrated from a standalone `docker run` container to a
+  compose stack — same reasoning as `/opt/homepage`: sits outside `/opt/arr`, so it needed
+  explicit addition or the compose file wouldn't be captured. Unlike Homepage, `portainer`
+  **does** stay on the pre-backup stop list (`APPS`) — that's for a consistent snapshot of the
+  `portainer_data` *volume* alongside it, unrelated to this file being plain YAML. Verified
+  captured end-to-end (not just script exit code): snapshot `c0f7ce99`, 2026-07-07.
 - `/var/lib/docker/volumes/portainer_data/_data` — the Portainer volume, which holds the
   **stack definitions** at `compose/<id>/docker-compose.yml`. Because the compose was pasted
   into Portainer's editor, the gluetun **WireGuard secret is inline in there** — this is the
@@ -539,6 +556,7 @@ the VPN is running). Recreate the two stacks from the restored compose files, re
 /opt/scrutiny/{config,influxdb}                    # config/ holds scrutiny.yaml (notify config, 600)
 /opt/uptime-kuma                                   # Uptime Kuma data (SQLite kuma.db + history)
 /opt/homepage                                      # Homepage dashboard config (widgets.yaml, services.yaml; owned 1000:1000)
+/opt/portainer/docker-compose.yml                  # Portainer compose file (migrated from docker run, 2026-07-07)
 /opt/wud                                           # WUD state store (regenerable; deliberately outside the backup set)
  
 # off-box backup machinery (host-level)
