@@ -1,6 +1,6 @@
 # pi-arr — system inventory
  
-Reference snapshot of the media server as built. Last updated: 2026-06-23.
+Reference snapshot of the media server as built. Last updated: 2026-07-07.
 Secrets (VPN keys, app passwords/API keys) are intentionally **not** stored here — they
 live in the gluetun environment and each app's config volume.
  
@@ -283,6 +283,46 @@ user-facing and stay **off** the VPN.
   Gmail channel (no new secret). **Why this needs v2:** Kuma counts a running, healthchecked
   container `up` *only* when health = `healthy`, else `down` (PR #4372); v1 reported unhealthy as
   *pending* and never alerted.
+### WUD — What's Up Docker (image-update notifications)
+- Image: `ghcr.io/getwud/wud:latest` (arm64 supported). Added 2026-07-07 (roadmap #5).
+  **Notify-only by construction:** the SMTP trigger is the only trigger defined — no update
+  triggers exist, so WUD cannot recreate containers. Updates are performed deliberately in
+  Portainer (workflow below).
+- Port **3002:3000** (host 3000 is Homepage's; WUD's internal port stays 3000). **No basic
+  auth** on the UI (anonymous) — same exposure posture as Homepage: Tailscale/LAN only,
+  never WAN.
+- Volumes: `/var/run/docker.sock:ro` (same caveat as Kuma's socket — `:ro` locks the file,
+  not the API) and `/opt/wud:/store` (state store, so a recreate doesn't re-announce every
+  already-known update). `TZ=Europe/Athens`, `restart: unless-stopped`, shared log cap.
+- **Watcher:** the default `local` socket watcher, `WUD_WATCHER_LOCAL_CRON=30 6 * * *`
+  (daily 06:30 Athens — clear of the 04:00 backup window). All 15 containers watched
+  (WATCHBYDEFAULT). **Digest watching is automatic:** WUD enables it by default for
+  non-semver tags, and everything here runs `:latest` — no labels needed on any container.
+  Consequence: detection reports "new digest," not a version delta — read the project's
+  release notes for what changed. Daily cadence keeps registry pull-API quota pressure
+  negligible (most images are lscr.io/ghcr.io; only ~5 on Docker Hub).
+- **Email trigger:** `WUD_TRIGGER_SMTP_GMAIL_*` → `smtp.gmail.com` port **465**,
+  `TLS_ENABLED=true`. NB that flag means **implicit TLS**, not STARTTLS — don't pair it
+  with 587 (the other three Gmail senders on this box use 587/STARTTLS; WUD uses the other
+  door, both fine with Google). Uses `FROM_ADDRESS` (bare `FROM` is deprecated);
+  `FROM_NAME=pi-arr`; To = the `+piarr` plus-address. Credentials injected as Portainer
+  stack env (`WUD_GMAIL_USER/PASS/TO`) — same pattern as the Homepage `HOMEPAGE_VAR_*`
+  secrets, keeping the app password out of the YAML. It's the shared Gmail app password —
+  the **fourth on-box copy**; see the auth map.
+- **Update workflow:** email / Homepage tile → WUD UI (`:3002`) to see what's pending →
+  **any app except gluetun:** Portainer → the container → **Recreate** with "Re-pull image"
+  (namespace apps rejoin gluetun's running namespace, same as after the nightly backup
+  restarts); confirm the Kuma monitor green after. **gluetun: never the per-container
+  recreate** — attended **stack-level** update only (Stacks → media → update with re-pull),
+  so `depends_on: service_healthy` governs ordering; verify the kill switch after (exit IP
+  still AirVPN). NB a stack-level re-pull updates *every* service in that stack with a
+  newer image, not just the one you came for.
+- **Rollback:** the restic backup reverts *config only* — it cannot roll back an image
+  (`:latest` still resolves to the new one after a restore). Image rollback = pin the
+  previous version tag and redeploy, or recreate against the old image ID while it's
+  still on disk un-pruned.
+- Clearing is automatic: on the next scan the running digest matches latest and the
+  pending count drops — no acknowledge step.
 ---
  
 ## Stack: `dashboard`
@@ -324,7 +364,9 @@ live in `/opt/homepage`.
   not the app itself — all the VPN-gated apps share this one published host IP.)
 - **Operations** — Uptime Kuma rollup (`type: uptimekuma`, `url: …:3001`, `slug:` = the published
   status-page slug, `fields: ["up","down","uptime","incident"]`), Scrutiny (`type: scrutiny`,
-  `url: …:8082`, no key), Portainer as a link.
+  `url: …:8082`, no key), WUD (`type: whatsupdocker`, `url: …:3002`,
+  `fields: ["monitoring","updates"]` — watched/pending-update counts; no credential fields,
+  WUD runs without auth), Portainer as a link.
 ### Kuma prerequisite
 - A single **published** Uptime Kuma status page backs the rollup tile: all monitors (7 HTTP + the
   `pi-arr gluetun (VPN)` Docker-Container monitor + the `pi-arr disk space` Push monitor) in one
@@ -437,6 +479,8 @@ daemon). Roadmap item #1; restore verified to scratch and over live.
   crown jewel. `/opt/arr` + these compose files rebuild the box on a fresh Portainer without
   needing Portainer's own DB.
 - **Excluded:** `/opt/arr/jellyfin/cache` (~5.9 GB of regenerable transcodes — see ISSUES.md #1).
+- **Not added:** `/opt/wud` (WUD's state store) — regenerable (WUD rebuilds it by rescanning;
+  worst case is a repeated update notification), so deliberately outside the set.
 ### Schedule & consistency
 - `pi-arr-backup.timer` → `pi-arr-backup.service` (oneshot) → `/usr/local/sbin/pi-arr-backup.sh`.
 - Fires `*-*-* 04:00` Athens, `RandomizedDelaySec=15min`, `Persistent=true` (runs a missed
@@ -495,6 +539,7 @@ the VPN is running). Recreate the two stacks from the restored compose files, re
 /opt/scrutiny/{config,influxdb}                    # config/ holds scrutiny.yaml (notify config, 600)
 /opt/uptime-kuma                                   # Uptime Kuma data (SQLite kuma.db + history)
 /opt/homepage                                      # Homepage dashboard config (widgets.yaml, services.yaml; owned 1000:1000)
+/opt/wud                                           # WUD state store (regenerable; deliberately outside the backup set)
  
 # off-box backup machinery (host-level)
 /usr/local/sbin/pi-arr-backup.sh                   # backup wrapper (root, 700)
@@ -535,6 +580,7 @@ the VPN is running). Recreate the two stacks from the restored compose files, re
 | Glances | 61208 | metrics |
 | Scrutiny | 8082 | drive health |
 | Uptime Kuma | 3001 | service up/down monitoring |
+| WUD | 3002 | image-update notifications (`monitoring` stack) |
 | FlareSolverr | 8191 | internal only (not published) |
  
 ---
@@ -556,12 +602,14 @@ the VPN is running). Recreate the two stacks from the restored compose files, re
   `/opt/homepage/services.yaml`. They live only on the box (Portainer stack env). No new external
   credential — they're copies/uses of keys already documented above.
 - VPN credentials: in the gluetun service environment (WireGuard keys/addresses).
-- Notification email (Scrutiny + Uptime Kuma + host msmtp): a Gmail **app password** (2FA
-  enabled). Three on-box copies, by necessity: inline in the shoutrrr URL in
+- Notification email (Scrutiny + Uptime Kuma + host msmtp + WUD): a Gmail **app password**
+  (2FA enabled). Four on-box copies, by necessity: inline in the shoutrrr URL in
   `/opt/scrutiny/config/scrutiny.yaml` (Scrutiny); in Uptime Kuma's SQLite DB
-  (`/opt/uptime-kuma/kuma.db`); and in `/etc/msmtprc` (root, 600) for the host low-disk-space
-  CRITICAL alert. Master copy in george's password manager. Revoke/rotate via Google Account →
-  Security → App passwords (rotating means updating all three on-box copies).
+  (`/opt/uptime-kuma/kuma.db`); in `/etc/msmtprc` (root, 600) for the host low-disk-space
+  CRITICAL alert; and in the `monitoring` Portainer stack env (`WUD_GMAIL_PASS`) for WUD's
+  update-notification emails (2026-07-07). Master copy in george's password manager.
+  Revoke/rotate via Google Account → Security → App passwords (rotating means updating all
+  four on-box copies).
 - Backup secrets (restic repo password, rclone OAuth token): see **Backups → Credentials** above.
 - **Uptime Kuma push token** — the `pi-arr disk space` Push monitor has a token embedded in its
   host script (`pi-arr-disk-alert.sh`, root/700). Not a credential to any external service — the
