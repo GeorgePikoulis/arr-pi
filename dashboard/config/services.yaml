@@ -84,7 +84,6 @@
         href: https://100.115.36.108:9443
         description: Container management
     - WUD:
-        icon: wud.png
         href: http://100.115.36.108:3002
         description: What's up Docker, container updater
         widget:
