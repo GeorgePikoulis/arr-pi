@@ -100,14 +100,47 @@ Notes / gotchas banked (see INVENTORY.md):
 - Small consumer UPS + Network UPS Tools (`nut`, apt) so the Pi detects "on battery" and
   runs a clean `poweroff` before dying.
 - Only hardware item on this list.
-## [ ] 5. Image-update notifications (not auto-apply)
+## [x] 5. Image-update notifications (not auto-apply) — DONE (2026-07-07)
  
 **Targets:** surprise breakage from `:latest` pulls.
-- **Diun** notifies on new image digests so updates are applied deliberately (verify its
-  arm64 tag at deploy).
-- **Avoid Watchtower-style auto-update** here — silent updates to gluetun or the
-  shared-namespace apps can take a VPN-gated stack down unattended.
-- Alternative / stronger: pin services to specific version tags.
+Built as **WUD (What's Up Docker)** (`ghcr.io/getwud/wud`, arm64 confirmed) rather than the
+penciled **Diun** — Diun does the email half and nothing else (fire-and-forget, no web UI or
+API, so nothing for a Homepage widget to query; no such widget exists). WUD covers all three
+wanted surfaces: **email** (SMTP trigger, the shared Gmail app password), its own **web UI**
+on **3002** (host 3000 is Homepage's), and a **Homepage tile** (`type: whatsupdocker`,
+monitoring/updates counts). Deployed into the `monitoring` stack.
+ 
+- **Notify-only is structural, not a setting:** the SMTP trigger is the only trigger
+  defined, so WUD *cannot* recreate anything. Its update triggers would act outside
+  Portainer (stack drift), and a WUD-recreated gluetun would strand the five namespace
+  apps — the same hazard flagged on #6. Updates stay deliberate, attended acts.
+- **Detection is digest-based, automatically:** WUD enables digest watching by default for
+  non-semver tags, and everything on this box runs `:latest` — so no labels on any
+  container, no media-stack edit. Trade-off: notifications say "new digest," not
+  "4.0.15 → 4.0.16"; the project's release notes are the changelog. Daily scan
+  (`30 6 * * *`, clear of the 04:00 backup window) keeps registry pull-API quota pressure
+  negligible. Pinning to version tags (this item's original "alternative / stronger")
+  stays open as a future refinement if semantic version deltas ever matter.
+- **The update workflow (what #5 exists to enable):** email / Homepage tile → WUD UI for
+  what's pending → **any app except gluetun:** Portainer per-container **Recreate** with
+  re-pull (namespace apps rejoin gluetun's running namespace, as after the nightly backup);
+  Kuma green = came back healthy. **gluetun: never per-container** — attended stack-level
+  update only (Compose ordering via `depends_on: service_healthy`), kill switch verified
+  after (exit IP still AirVPN).
+- **Rollback reality, banked:** the restic backup reverts *config only* — it cannot roll
+  back an image (after a restore, `:latest` still points at the new one). Image rollback =
+  pin the previous version tag and redeploy, or recreate against the old image ID while
+  it's still on disk un-pruned.
+ 
+Verified: all 15 containers visible in WUD's UI; manual trigger run → email **landed in the
+inbox** (delivery confirmed, not just the UI saying it ran); Homepage tile shows live counts
+(a pending Uptime Kuma update served as the test fixture). Full config in INVENTORY.md →
+**Stack: `monitoring`** (WUD).
+ 
+One loose end, noted not decided: WUD is itself an eighth web-facing service with **no Kuma
+HTTP monitor** — decide whether it earns one. (Its worst failure mode — silently *not
+detecting* updates — wouldn't be caught by an HTTP probe anyway; a probe only catches the
+container being down.)
 ## [ ] 6. Auto-recovery (autoheal) — with a caveat
  
 **Targets:** containers stuck in an unhealthy state.
