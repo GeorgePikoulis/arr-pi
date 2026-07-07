@@ -137,10 +137,13 @@ inbox** (delivery confirmed, not just the UI saying it ran); Homepage tile shows
 (a pending Uptime Kuma update served as the test fixture). Full config in INVENTORY.md →
 **Stack: `monitoring`** (WUD).
  
-One loose end, noted not decided: WUD is itself an eighth web-facing service with **no Kuma
-HTTP monitor** — decide whether it earns one. (Its worst failure mode — silently *not
-detecting* updates — wouldn't be caught by an HTTP probe anyway; a probe only catches the
-container being down.)
+One loose end, closed same day (2026-07-07): WUD, as an eighth web-facing service, got a
+standard Kuma HTTP monitor — `WUD` → `:3002/health` (the endpoint WUD's own image
+HEALTHCHECK curls), retries 2, added to the published status page (so the Homepage Kuma
+rollup counts it). Deliberately **not** added to the backup maintenance window — WUD isn't
+on the backup stop list, so it rides through the 04:00 backup running. Known limit,
+accepted: the probe catches the container being down, not WUD silently failing to *detect*
+updates.
 ## [ ] 6. Auto-recovery (autoheal) — with a caveat
  
 **Targets:** containers stuck in an unhealthy state.
