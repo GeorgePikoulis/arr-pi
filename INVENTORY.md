@@ -176,17 +176,36 @@ user-facing and stay **off** the VPN.
   (inotify is unreliable for deletions over bind mounts). Deletions surface on the next
   scheduled scan — given the `.keep` sentinel above, which is what makes that reliable on the
   empty-folder edge case.  
-### Jellyseerr (NOT behind VPN)
-- Image: `fallenbagel/jellyseerr:latest`
-- Env: `LOG_LEVEL=info`, `TZ=Europe/Athens`. Port **5055**. Runs internally as uid 1000.
-- Volume: `/opt/arr/jellyseerr:/app/config`
-- Service connections (entered in Jellyseerr setup):
+### Seerr — formerly Jellyseerr (NOT behind VPN)
+- Image: `ghcr.io/seerr-team/seerr:latest` — **migrated 2026-07-08** from
+  `fallenbagel/jellyseerr:latest`. Jellyseerr and Overseerr merged into the unified **Seerr**
+  project; the old image is frozen (no new releases, incl. security patches). The in-place DB
+  migration ran automatically on first start — verified: UI on 3.3.0, request history intact,
+  Kuma green, Homepage widget counts correct.
+- **Container/service name deliberately kept `jellyseerr`** — the backup stop list, the Kuma
+  monitor, the Homepage widget, and these docs all reference it by name, and Docker doesn't
+  care that name and image differ. Renaming would mean touching the backup script for zero gain.
+- **`init: true` is required** (compose) — the Seerr image ships no init process; without the
+  flag, signal handling breaks (zombie processes, ungraceful stops). Per the official
+  migration guide.
+- Env: `LOG_LEVEL=info`, `TZ=Europe/Athens`. Port **5055** (unchanged — so Kuma/Homepage URLs
+  were untouched). Runs as the `node` user (UID 1000), genuinely **non-root** (the old image
+  ran parts as root).
+- Volume: `/opt/arr/jellyseerr:/app/config` — **entire tree must be owned 1000:1000.** Gotcha
+  banked: the old image had written `db/` as **root**; caught by a pre-migration
+  `ls -ldn` check and fixed with `chown -R 1000:1000` *before* switching. A root-owned `db/`
+  would have failed the non-root Seerr container at startup.
+- Service connections unchanged (stored in Seerr's DB, survived migration):
   - Jellyfin → `http://jellyfin:8096`
-  - Radarr → `http://gluetun:7878`
-  - Sonarr → `http://gluetun:8989`
-  - (Sonarr/Radarr reached via the **gluetun** container name + their API keys, since they
-    have no network identity of their own.)
-- Uses built-in TMDB integration — no user-supplied TMDB key.
+  - Radarr → `http://gluetun:7878` · Sonarr → `http://gluetun:8989` (via the gluetun container
+    name + API keys, as before)
+  - Built-in TMDB integration — no user-supplied key.
+- Homepage `type: jellyseerr` widget **verified compatible** with Seerr's API post-migration
+  (Seerr kept `/api/v1`).
+- **Rollback copy (temporary):** `/opt/arr/jellyseerr.pre-seerr` — a pre-migration `cp -a` of
+  the config, original (partly root) ownership preserved. Sits inside the restic include path,
+  so it rides along in snapshots (harmless — small, dedups). Delete after a few days of
+  confidence in the new image.
 ---
  
 ## Stack: `monitoring`
@@ -328,6 +347,12 @@ user-facing and stay **off** the VPN.
   still on disk un-pruned.
 - Clearing is automatic: on the next scan the running digest matches latest and the
   pending count drops — no acknowledge step.
+- **Blind spot banked (2026-07-08):** digest watching detects *new* digests — it cannot detect
+  a repo that has gone quiet because the project **moved or was renamed**. `fallenbagel/jellyseerr`
+  froze when Jellyseerr merged into Seerr, and WUD reported nothing wrong for weeks — the exact
+  failure #5 exists to prevent, defeated silently. A "suspiciously long time since any update"
+  is a signal to check the project's homepage, not a comfort. (Found via the Seerr version
+  banner in the app's own UI, not via monitoring.)  
 ---
  
 ## Stack: `dashboard`
