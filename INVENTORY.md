@@ -202,10 +202,6 @@ user-facing and stay **off** the VPN.
   - Built-in TMDB integration — no user-supplied key.
 - Homepage `type: jellyseerr` widget **verified compatible** with Seerr's API post-migration
   (Seerr kept `/api/v1`).
-- **Rollback copy (temporary):** `/opt/arr/jellyseerr.pre-seerr` — a pre-migration `cp -a` of
-  the config, original (partly root) ownership preserved. Sits inside the restic include path,
-  so it rides along in snapshots (harmless — small, dedups). Delete after a few days of
-  confidence in the new image.
 ---
  
 ## Stack: `monitoring`
