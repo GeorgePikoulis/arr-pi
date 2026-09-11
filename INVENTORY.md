@@ -1,6 +1,6 @@
 # pi-arr — system inventory
  
-Reference snapshot of the media server as built. Last updated: 2026-07-07.
+Reference snapshot of the media server as built. Last updated: 2026-09-07.
 Secrets (VPN keys, app passwords/API keys) are intentionally **not** stored here — they
 live in the gluetun environment and each app's config volume.
  
@@ -12,10 +12,10 @@ live in the gluetun environment and each app's config volume.
 |------|-------|
 | Device | Raspberry Pi 5, 8 GB RAM, active cooling + official M.2 HAT+ |
 | Storage | Single NVMe — Micron MTFDKCD512QGN-1BN1AABLA, ~477 GiB. Holds OS **and** all data. No second disk. **QLC NAND, DRAM-less (HMB)** (Micron 2500-family, 232-layer QLC) — value drive: write speed/endurance degrade as it fills (pSLC cache shrinks), so keep extra free headroom. |
-| OS | Raspberry Pi OS Lite (Bookworm, 64-bit / aarch64), kernel 6.12.75+rpt-rpi-2712 |
+| OS | Raspberry Pi OS Lite (**trixie** / Debian 13, 64-bit / aarch64), point release **13.6**. Kernel `linux-image-rpi-2712` **1:6.18.39-1+rpt1** (2026-09-07). NB: this row previously read *Bookworm, kernel 6.12.75* and had gone stale unnoticed — verify against `uname -r` and the apt sources rather than trusting it. |
 | Hostname | `pi-arr` |
 | Primary user | `george` (UID 1000, GID 1000) |
-| Boot | NVMe-first (`BOOT_ORDER=0xf461`), EEPROM updated |
+| Boot | NVMe-first (`BOOT_ORDER=0xf461` — verified intact after the 2026-09-07 bootloader update). `rpi-eeprom` **28.30-1**. Pi 5 uses **A/B EEPROM updates**: the new image is written to the *uncommitted* partition and committed only once fully written and verified, so an interrupted or power-lost bootloader update cannot brick the boot path (Pi 5 / CM5 only — no such protection on a Pi 4). |
 | Timezone | Europe/Athens (host clock was found on `Europe/London` 2026-06-19 and corrected with `timedatectl set-timezone Europe/Athens`; UTC instant was always correct, only display/stamping was off) |
  
 ### Networking
@@ -29,8 +29,11 @@ live in the gluetun environment and each app's config volume.
  
 ## Host-level installs (apt / scripts)
  
-- **Docker Engine** — installed via the get.docker.com convenience script. `george`
-  added to the `docker` group.
+- **Docker Engine** — installed via the get.docker.com convenience script, then kept current
+  from the `download.docker.com` trixie repo. `george` added to the `docker` group.
+  Versions as of 2026-09-07: `docker-ce` / `docker-ce-cli` **5:29.8.0**, `containerd.io`
+  **2.3.4**, `docker-compose-plugin` **5.5.1**, `docker-buildx-plugin` **0.37.0**,
+  `docker-model-plugin` **1.2.6**.
 - **Tailscale** — installed on the host (not containerized).
 - **restic + rclone** — host binaries for the off-box config backup (see **Backups** below).
   Deliberately not containerized, so the backup survives a wedged Docker daemon.
@@ -41,6 +44,64 @@ live in the gluetun environment and each app's config volume.
   = `N`); avoided so a confinement rule can't silently block the alert path.
 - (Pi firmware/EEPROM tooling is part of Pi OS; `rpi-imager` was used only on a separate
   bootstrap drive during install and is not part of the running server.)
+---
+ 
+## Host OS & package updates (apt)
+ 
+Staged upgrade procedure, established 2026-09-07 (trixie 13.5 → 13.6; 92 packages including
+Docker, kernel and bootloader). Run everything inside `tmux`; stay clear of the 04:00 backup
+window and the 06:30 WUD scan. Capture a baseline first (`df -h /`, `uname -r`, `docker version`,
+`sudo rpi-eeprom-config`, last backup's journal, all Kuma monitors green).
+ 
+Split into three separate `apt install --only-upgrade <explicit list>` passes, verifying between
+each. Explicit lists mean **no `apt-mark hold` state** to set and later forget to clear.
+ 
+1. **Tailscale first.** `tailscaled` restarts, so run from `tmux` (or the LAN IP) or the SSH
+   session dies mid-dpkg. Expect **Kuma to flap**: all eight HTTP monitors probe
+   `100.115.36.108`, so `tailscale0` bouncing can fire alert emails — correct behaviour, not a
+   fault; use a Kuma maintenance window to suppress. Doing this first re-establishes the remote
+   path while nothing else is in flux. Verify `tailscale ip -4` is still `100.115.36.108` and
+   reconnect over Tailscale before going further.
+2. **Docker second.** `docker-ce`'s postinst restarts `dockerd`, which stops and restarts
+   **every** container in daemon-chosen order — `depends_on: service_healthy` is Compose-only
+   and is **not** honoured on a daemon restart. **Stop the media / monitoring / dashboard stacks
+   first** (SQLite everywhere: the arr apps, Kuma, Seerr); leave Portainer running, it's how you
+   bring them back. Upgrade all seven packages in one pass (`docker-ce`, `docker-ce-cli`,
+   `docker-ce-rootless-extras`, `containerd.io`, `docker-buildx-plugin`,
+   `docker-compose-plugin`, `docker-model-plugin`). Bring **media up at stack level** so gluetun
+   is ordered first, then monitoring, then dashboard. Kill-switch check without reintroducing the
+   deleted `curlimages/curl` image: `docker logs gluetun | tail -30` — gluetun prints its
+   assigned public IP on connect.
+3. **Everything else last** (`apt upgrade`), incl. kernel and `rpi-eeprom`. Stop the stacks
+   again first: containers stopped *deliberately* stay stopped across a reboot despite
+   `restart: unless-stopped` — that's what gives controlled Compose bring-up instead of
+   auto-start in daemon order. Read `apt upgrade -s` before running; if anything is "kept back",
+   inspect `apt full-upgrade -s` and read the removal list before reaching for it.
+**Bootloader / EEPROM.** Installing `rpi-eeprom` only *stages* the image; it is flashed at the
+next boot. Before rebooting, `sudo rpi-eeprom-update` reports what's pending and
+`sudo rpi-eeprom-update -r` removes the staged files and **cancels** it — the escape hatch if
+you'd rather take the kernel alone first. `rpi-eeprom-update` **migrates the existing config by
+default**, so `BOOT_ORDER` carries over; `-d` is the flag that would replace it with stock
+defaults — don't use it. Post-reboot checks: `uname -r`, `sudo rpi-eeprom-config` (BOOT_ORDER
+still `0xf461`), `sudo rpi-eeprom-update` (now reads up to date), `findmnt /` (still on NVMe).
+See also Host → Boot for the Pi 5 A/B protection.
+ 
+**Reading `apt update` output — two benign lines.** `Err:`/`Ign:` on a `Packages.diff/Index`
+("Need N compressed bytes, but limit is M") is apt's pdiff size guard: the accumulated diffs
+would exceed the whole index, so apt abandons pdiff and fetches the full `Packages` file in the
+same run — you'll see the matching `Get:` at exactly the "original is" byte count. A *real*
+index failure ends with "Some index files failed to download"; the absence of that line is the
+tell. And `Notice: … changed its 'Version' value from 'x' to 'y'` is a Debian point release,
+not a suite change.
+ 
+**Docker version notes banked (2026-09-07, 29.6.1 → 29.8.0):** 29.8.0 fixes health checks being
+delayed too long when the start interval exceeds the start period — relevant because the
+`pi-arr gluetun (VPN)` Kuma monitor reads `State.Health.Status`, so watch that monitor for a few
+minutes after a Docker upgrade rather than glancing once. 29.8.0 also reserves the network names
+"container" and "container:"; that looks alarming next to `network_mode: service:gluetun` (which
+resolves to `container:gluetun`) but is the opposite — it blocks creating a *network named*
+`container`, the string that would collide with that syntax. No effect on this stack.
+ 
 ---
  
 ## Portainer (standalone container, not a stack)
@@ -399,6 +460,52 @@ live in `/opt/homepage`.
   group; the tile reads that page via its slug.
 ---
  
+## Stack: `upsnap`
+ 
+Single-service, standalone stack (not part of `media`/`monitoring`/`dashboard`) added
+**2026-09-10**. Purpose: remote Wake-on-LAN for `bliss`, George's separate Ryzen 3700X
+desktop (dual-boot Windows/Linux, MSI AM4 board) — not part of this box's own hardware.
+Deployed via Portainer → Stacks → Add stack (web editor), not from a compose file in this
+repo yet.
+ 
+### UpSnap
+- Image: `ghcr.io/seriousm4x/upsnap:5` — small SvelteKit/Go/PocketBase Wake-on-LAN web app.
+- `network_mode: host` — required; it needs to emit a genuine L2 broadcast for the magic
+  packet, which bridge networking can't do.
+- `cap_add: NET_RAW`, `cap_drop: ALL` — NET_RAW is for its ping/nmap-based device status
+  checks, not for sending the wake packet itself.
+- Volume: `./data:/app/pb_data` (relative path). Deployed through Portainer's web editor, so
+  this lands under Portainer's own stack directory inside the `portainer_data` volume
+  (`compose/<id>/data`) — **already covered by the existing restic backup of the whole
+  `portainer_data` volume** (see Backups → What's captured); no backup script change needed.
+- Env: `TZ=Europe/Athens`. `UPSNAP_HTTP_LISTEN` left unset — defaults to `0.0.0.0:8090`
+  (baked into the image).
+- Exposed on the tailnet: `sudo tailscale serve --bg http://localhost:8090` →
+  `https://pi-arr.tailfdeecd.ts.net/`. No LAN port to remember from a phone.
+- First-run auth is PocketBase's, not UpSnap's own: creating the superuser needs a one-time
+  link printed to the container's startup log (Portainer → Containers → upsnap → Logs, or
+  `docker logs upsnap`) — there's no plain signup form.
+- Registered device — `bliss`: MAC `00:D8:61:9C:F0:12` (Realtek PCIe GbE), IP `10.0.69.235`,
+  netmask `255.255.255.0`. IP and netmask are required fields in UpSnap's UI even though the
+  whole point is waking a machine that's normally off with no live IP at all — they're used
+  only for (a) the dashboard's status ping and (b) computing the subnet broadcast address;
+  the actual wake is MAC-only and hardware-level, and doesn't touch bliss's IP stack. `bliss`
+  is not on a DHCP reservation as of this writing (pending) — worth pinning on the Flint so
+  the ping/broadcast-target facts don't drift if the lease changes.
+- **Known gap:** deployed without the shared `x-logging: *default-logging` block every other
+  container on this box carries — currently on Docker's unbounded default json-file driver.
+  Low risk in practice (one small, low-traffic container) but inconsistent with this box's own
+  log-rotation rule (see **Logging / log rotation** below). Add the anchor and recreate the
+  stack next time it's touched.
+- **Why `pi-arr` and not `homelab` (the Pi 3)** — pi-arr's Portainer was already open when this
+  was being set up, and it turned out to be the better host regardless: already on bliss's LAN
+  and on the tailnet with a stable IP, meaningfully more headroom than the Pi 3, and already
+  Compose/Portainer-managed the same way as every other stack here.
+- Not yet added to Kuma, Homepage, or WUD's watch list explicitly — WUD's `WATCHBYDEFAULT`
+  should already be picking it up for image-update digests; Kuma/Homepage entries are optional
+  future additions, not done.
+---
+ 
 ## Logging / log rotation (all containers)
  
 Per-service log caps so container logs can't fill the root partition (roadmap #3, 2026-06-19).
@@ -415,7 +522,9 @@ Chose compose-level `logging:` over `/etc/docker/daemon.json` deliberately — s
   ```
 - **Portainer (standalone):** can't take a stack `logging:` block, so the same caps are
   `docker run` flags (`--log-opt max-size=10m --log-opt max-file=3`) — see the Portainer table.
-- Result: all 14 containers cap at 10 MB × 3 = 30 MB each (~420 MB worst case).
+- Result: all 14 containers across `media`/`monitoring`/`dashboard` cap at 10 MB × 3 = 30 MB
+  each (~420 MB worst case). **`upsnap` (added 2026-09-10) is not yet on this scheme** — see
+  its known-gap note above; treat the 14-container figure as not yet including it.
 - **Why not `daemon.json`:** (1) daemon log-opts apply only to **newly created** containers and
   need a full **daemon restart** to load — and a daemon restart force-cycles gluetun, with the
   namespace apps **not** ordered by `depends_on` (that's Compose-only, not honoured on daemon
@@ -500,10 +609,12 @@ daemon). Roadmap item #1; restore verified to scratch and over live.
   retention absorbs the changed path-set automatically. YAML-only (no DB), so it does **not** join
   the pre-backup container-stop list — safe to snapshot live.
 - `/var/lib/docker/volumes/portainer_data/_data` — the Portainer volume, which holds the
-  **stack definitions** at `compose/<id>/docker-compose.yml`. Because the compose was pasted
-  into Portainer's editor, the gluetun **WireGuard secret is inline in there** — this is the
-  crown jewel. `/opt/arr` + these compose files rebuild the box on a fresh Portainer without
-  needing Portainer's own DB.
+  **stack definitions** at `compose/<id>/docker-compose.yml`, and, for any stack whose volumes
+  use relative paths deployed through Portainer's web editor (e.g. `upsnap`'s
+  `./data:/app/pb_data`), **those bind-mounted volumes too** — they live under this same tree.
+  Because the compose was pasted into Portainer's editor, the gluetun **WireGuard secret is
+  inline in there** — this is the crown jewel. `/opt/arr` + these compose files rebuild the box
+  on a fresh Portainer without needing Portainer's own DB.
 - **Excluded:** `/opt/arr/jellyfin/cache` (~5.9 GB of regenerable transcodes — see ISSUES.md #1).
 - **Not added:** `/opt/wud` (WUD's state store) — regenerable (WUD rebuilds it by rescanning;
   worst case is a repeated update notification), so deliberately outside the set.
@@ -514,8 +625,10 @@ daemon). Roadmap item #1; restore verified to scratch and over live.
 - For a mid-write-safe snapshot the script **stops the eight app containers** (bazarr,
   qbittorrent, sonarr, radarr, prowlarr, jellyfin, jellyseerr, portainer), backs up, then
   restarts them. **gluetun is left running** — it has no DB and must never cycle (kill switch
-  stays up; apps rejoin its namespace on restart). Downtime ≈ 30–60 s. A `trap` guarantees
-  the apps restart even if the backup fails or the job is killed.
+  stays up; apps rejoin its namespace on restart). `upsnap` is **not** on this stop list (not
+  a SQLite-on-bind-mount app in the same way; PocketBase's SQLite file is captured live via the
+  whole-volume backup above, same treatment as Homepage's YAML). Downtime ≈ 30–60 s. A `trap`
+  guarantees the apps restart even if the backup fails or the job is killed.
 - Retention (run after restart; repo-only, no downtime): `forget --group-by host
   --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune`. `--group-by host` keeps all
   pi-arr snapshots on one timeline regardless of path-set changes.
@@ -567,6 +680,10 @@ the VPN is running). Recreate the two stacks from the restored compose files, re
 /opt/homepage                                      # Homepage dashboard config (widgets.yaml, services.yaml; owned 1000:1000)
 /opt/wud                                           # WUD state store (regenerable; deliberately outside the backup set)
  
+# upsnap's own data (PocketBase DB: device list, MAC/IP/netmask, superuser account) lives
+# under the portainer_data volume, not /opt — see Stack: upsnap and Backups → What's captured
+# /var/lib/docker/volumes/portainer_data/_data/compose/<id>/data
+ 
 # off-box backup machinery (host-level)
 /usr/local/sbin/pi-arr-backup.sh                   # backup wrapper (root, 700)
 /etc/systemd/system/pi-arr-backup.{service,timer}
@@ -608,6 +725,7 @@ the VPN is running). Recreate the two stacks from the restored compose files, re
 | Uptime Kuma | 3001 | service up/down monitoring |
 | WUD | 3002 | image-update notifications (`monitoring` stack) |
 | FlareSolverr | 8191 | internal only (not published) |
+| UpSnap | 8090 | Wake-on-LAN relay for `bliss` (standalone `upsnap` stack); reached via `https://pi-arr.tailfdeecd.ts.net/` (tailscale serve), not the raw port |
  
 ---
  
@@ -643,3 +761,5 @@ the VPN is running). Recreate the two stacks from the restored compose files, re
   world-readable files all the same. Regenerate from the monitor's page in Uptime Kuma if ever
   needed. (The former `pi-arr vpn exit` monitor's token was retired with that monitor on
   2026-06-22 — see **VPN exit check — retired**.)
+- **UpSnap superuser** — created via the one-time PocketBase setup link (see Stack: `upsnap`);
+  password chosen by George directly in the browser, not stored by Claude.
