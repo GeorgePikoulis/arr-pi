@@ -52,6 +52,11 @@ Everything that touches the internet for downloading rides an always-on AirVPN t
   are the high-stakes pieces. Before committing changes that affect either (leak risk,
   filling/corrupting the root disk), verify the load-bearing facts and prefer changes
   that keep an escape hatch open.
+- **An image that never updates is a signal, not a comfort.** Update watching (WUD) is
+  digest-based: it sees new releases, not the *absence* of them. A project that gets renamed,
+  merged, or abandoned leaves its old image frozen and the monitoring permanently green
+  (Jellyseerr → Seerr, caught 2026-07-08 only via the app's own UI). If a container hasn't
+  flagged an update in an unusually long time, check the upstream project's status directly.
 
 ## Access & networking
 
