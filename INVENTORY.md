@@ -369,9 +369,14 @@ user-facing and stay **off** the VPN.
   **Notify-only by construction:** the SMTP trigger is the only trigger defined — no update
   triggers exist, so WUD cannot recreate containers. Updates are performed deliberately in
   Portainer (workflow below).
-- Port **3002:3000** (host 3000 is Homepage's; WUD's internal port stays 3000). **No basic
-  auth** on the UI (anonymous) — same exposure posture as Homepage: Tailscale/LAN only,
-  never WAN.
+- Port **3002:3000** (host 3000 is Homepage's; WUD's internal port stays 3000). **Auth is now
+  mandatory (upstream breaking change, hit 2026-09-14 on the 8.4.0→9.0.2 jump)** — WUD now
+  hard-exits at boot if no admin user exists, rather than starting with anonymous UI access.
+  Fixed via `WUD_AUTH_ADMIN_USER` / `WUD_AUTH_ADMIN_PASSWORD`, set in the `monitoring` stack
+  env **and** referenced in the `wud` service's own `environment:` block — the stack-env panel
+  alone doesn't inject anything into the container; both layers are required. Previous posture
+  ("no basic auth, anonymous UI") no longer exists upstream. Same exposure posture otherwise:
+  Tailscale/LAN only, never WAN.
 - Volumes: `/var/run/docker.sock:ro` (same caveat as Kuma's socket — `:ro` locks the file,
   not the API) and `/opt/wud:/store` (state store, so a recreate doesn't re-announce every
   already-known update). `TZ=Europe/Athens`, `restart: unless-stopped`, shared log cap.
@@ -444,7 +449,11 @@ live in `/opt/homepage`.
 - A **datetime** widget.
 ### `services.yaml` groups
 - **Media** — Jellyfin (`type: jellyfin`, **new** API key created in Jellyfin → Dashboard →
-  Advanced → API Keys), Jellyseerr (`type: jellyseerr`, key from Settings → General).
+  Advanced → API Keys; **`version: 2`** added 2026-09-14 after Jellyfin jumped `:latest` from
+  10.x to **12.0.0** — that major dropped the legacy `/emby/`-prefixed routes the widget's
+  default (`version: 1`) calls, breaking the tile with `Unexpected end of JSON input`;
+  `version: 2` switches it to the native endpoints Jellyfin ≥10.12/12.x expects), Jellyseerr
+  (`type: jellyseerr`, key from Settings → General).  
 - **Acquisition** — qBittorrent (`type: qbittorrent`, WebUI **username + password**, not a key),
   Sonarr/Radarr (`type: sonarr`/`radarr`, existing API keys), Prowlarr + Bazarr as plain links
   with a `ping` status dot. (NB: `ping` targets the host IP, so it confirms the Pi is reachable,
@@ -452,8 +461,12 @@ live in `/opt/homepage`.
 - **Operations** — Uptime Kuma rollup (`type: uptimekuma`, `url: …:3001`, `slug:` = the published
   status-page slug, `fields: ["up","down","uptime","incident"]`), Scrutiny (`type: scrutiny`,
   `url: …:8082`, no key), WUD (`type: whatsupdocker`, `url: …:3002`,
-  `fields: ["monitoring","updates"]` — watched/pending-update counts; no credential fields,
-  WUD runs without auth), Portainer as a link.
+  `fields: ["monitoring","updates"]` — watched/pending-update counts; **`username`/`password`
+  required as of 2026-09-14** (`{{HOMEPAGE_VAR_WUD_USER}}` / `{{HOMEPAGE_VAR_WUD_PASS}}`) — WUD's
+  9.0.2 upgrade locked its API behind mandatory auth, breaking the widget's prior no-credential
+  call; same fix pattern as the other widgets: stack-env value in `dashboard`'s Environment
+  variables **and** a matching line in the `homepage` service's `environment:` block, then the
+  `{{HOMEPAGE_VAR_*}}` reference here), Portainer as a link.  
 ### Kuma prerequisite
 - A single **published** Uptime Kuma status page backs the rollup tile: all monitors (8 HTTP + the
   `pi-arr gluetun (VPN)` Docker-Container monitor + the `pi-arr disk space` Push monitor) in one
@@ -745,6 +758,12 @@ the VPN is running). Recreate the two stacks from the restored compose files, re
   through the `dashboard` Portainer stack env and referenced as `{{HOMEPAGE_VAR_NAME}}` in
   `/opt/homepage/services.yaml`. They live only on the box (Portainer stack env). No new external
   credential — they're copies/uses of keys already documented above.
+- **WUD admin credential (new, 2026-09-14)** — `WUD_AUTH_ADMIN_USER` / `WUD_AUTH_ADMIN_PASSWORD`,
+  required once WUD 9.0.2 made auth mandatory. Two on-box copies: the `monitoring` stack env
+  (feeds the `wud` service's own `environment:` block, where WUD checks it at boot) and the
+  `dashboard` stack env as `HOMEPAGE_VAR_WUD_USER`/`PASS` (reused as the Homepage widget's login,
+  same value — not a separate account). Chosen by George directly in Portainer; not stored by
+  Claude.  
 - VPN credentials: in the gluetun service environment (WireGuard keys/addresses).
 - Notification email (Scrutiny + Uptime Kuma + host msmtp + WUD): a Gmail **app password**
   (2FA enabled). Four on-box copies, by necessity: inline in the shoutrrr URL in
