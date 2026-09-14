@@ -27,7 +27,7 @@ services:
       TZ: Europe/Athens
       # Required, else Homepage refuses connections. Comma-separated host:port,
       # no spaces. Add 10.0.69.x:3000 after the office->home move.
-      HOMEPAGE_ALLOWED_HOSTS: "100.115.36.108:3000,10.0.1.59:3000"
+      HOMEPAGE_ALLOWED_HOSTS: "100.115.36.108:3000,10.0.1.59:3000,pi-arr:3000"
       # --- widget auth secrets (env-var substitution; see .env.example) ---
       HOMEPAGE_VAR_JELLYFIN_KEY: ${HOMEPAGE_VAR_JELLYFIN_KEY}
       HOMEPAGE_VAR_JELLYSEERR_KEY: ${HOMEPAGE_VAR_JELLYSEERR_KEY}
@@ -35,6 +35,8 @@ services:
       HOMEPAGE_VAR_QBIT_PASSWORD: ${HOMEPAGE_VAR_QBIT_PASSWORD}
       HOMEPAGE_VAR_SONARR_KEY: ${HOMEPAGE_VAR_SONARR_KEY}
       HOMEPAGE_VAR_RADARR_KEY: ${HOMEPAGE_VAR_RADARR_KEY}
+      HOMEPAGE_VAR_WUD_USER: ${HOMEPAGE_VAR_WUD_USER}
+      HOMEPAGE_VAR_WUD_PASS: ${HOMEPAGE_VAR_WUD_PASS}
     volumes:
       # Owned 1000:1000 on the host (chown before first start).
       - /opt/homepage:/app/config
