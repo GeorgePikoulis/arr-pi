@@ -15,6 +15,7 @@
           type: jellyfin
           url: http://100.115.36.108:8096
           key: {{HOMEPAGE_VAR_JELLYFIN_KEY}}
+          version: 2
           enableBlocks: true
           enableNowPlaying: true
     - Jellyseerr:
@@ -83,10 +84,13 @@
     - Portainer:
         href: https://100.115.36.108:9443
         description: Container management
+
     - WUD:
         href: http://100.115.36.108:3002
         description: What's up Docker, container updater
         widget:
           type: whatsupdocker
           url: http://100.115.36.108:3002
+          username: "{{HOMEPAGE_VAR_WUD_USER}}"
+          password: "{{HOMEPAGE_VAR_WUD_PASS}}"
           fields: ["monitoring", "updates"]
