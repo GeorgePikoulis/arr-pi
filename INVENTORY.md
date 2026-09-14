@@ -223,8 +223,16 @@ user-facing and stay **off** the VPN.
 - Image: `lscr.io/linuxserver/jellyfin:latest`
 - PUID/PGID 1000, port **8096**
 - Volumes: `/opt/arr/jellyfin:/config`, `/data/media:/data/media:ro`
+- **Running version: 12.0.0** (jumped from 10.x via `:latest` during the 2026-09-14 WUD-flagged
+  update backlog — see ISSUES.md #3). Like the Host OS/kernel row, this line will go stale the
+  moment the next `:latest` pull lands — verify against
+  `curl -s http://localhost:8096/System/Info/Public` rather than trusting it, especially before
+  diagnosing anything client- or API-shaped. 12.0 dropped the legacy `/emby/`-prefixed API
+  routes present in 10.x (broke Homepage's widget until `version: 2` was set — see
+  `services.yaml`); anything else still assuming those routes exist needs the same check.
+  Verified working on web and mobile clients before being kept rather than rolled back.
 - No hardware transcoding (Pi 5 has no HW encoder). Configured/used for **direct play** —
-  set clients to Original quality.
+  set clients to Original quality.  
 - **`.keep` sentinel files at each library root** (`/data/media/movies/.keep`,
   `/data/media/tv/.keep`, added 2026-06-26): keep the library folders from ever being
   *completely* empty. Jellyfin's scanner **skips an empty library root and won't prune**
