@@ -143,4 +143,51 @@ burn-in. The cache is safe to clear (it regenerates), but clearing it before fin
 the cause just defers the question — find the *why* first.
  
 </details>
+
+---
+
+## [x] 3. Portainer per-container "Recreate" fails on VPN-namespace containers — RESOLVED (2026-09-14): known upstream Portainer bug; use stack-level update instead
+
+**Seen (2026-09-14):** After WUD flagged 7 genuine pending updates (bazarr, flaresolverr,
+jellyfin, prowlarr, qbittorrent, radarr, sonarr — confirmed via raw digest comparison, not a
+stale-flag artifact), attempting **Portainer → container → Recreate** on one of the
+VPN-namespace apps failed immediately with:
+
+```
+Failed recreating container: Create container error: Error response from daemon:
+conflicting options: hostname and the network mode
+```
+
+**Root cause:** known, still-open upstream Portainer bug
+([portainer/portainer#13012](https://github.com/portainer/portainer/issues/13012)). Portainer's
+single-container **Recreate** button always sends an explicit `hostname` in its create request.
+Docker's daemon flatly rejects `hostname` + `network_mode: container:<X>` in the same call —
+which is exactly what `network_mode: "service:gluetun"` resolves to. This fires **regardless of
+whether the compose file itself sets a hostname** — it's baked into how Portainer's
+per-container recreate constructs the request, not a config problem on this box. Affects the
+five VPN-gated apps (bazarr, prowlarr, qbittorrent, radarr, flaresolverr) whenever recreated
+individually via the button; jellyfin/sonarr/etc. aren't on gluetun's namespace and wouldn't
+hit this path directly.
+
+**Fix (workaround):** **stack-level "Update the stack"** (Portainer's `docker compose up -d`
+equivalent) doesn't go through the broken single-container code path. Used it to update all 7
+pending containers in the `media` stack in one shot instead of 7 individual recreates — verified
+working, all containers came back healthy, kill switch confirmed intact via
+`docker logs gluetun | tail -30`.
+
+**Forward-looking — the actual behavior change this bakes in:** for any of the five
+VPN-namespace apps, **use stack-level "Update the stack" with re-pull, never the per-container
+Recreate button.** This is now the same rule as gluetun's own existing "never per-container
+recreate" caveat — they now share one procedure. Two things to keep in mind when using the
+workaround:
+- **A stack-level re-pull updates *every* service in that stack whose image changed**, not just
+  the one you meant to fix — including gluetun itself, if AirVPN has shipped a newer image.
+  Expect the five namespace apps to blip red together in Kuma during the restart (the normal
+  gluetun-drop signature, not a fault), and re-verify the kill switch afterward regardless of
+  which container you actually came to update.
+- This doesn't retire the Portainer bug — it's still open upstream and still breaks the
+  single-container button for these five. The workaround is durable until Portainer ships a fix,
+  not a one-time fix for this incident.
+
+---
  
