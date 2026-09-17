@@ -687,6 +687,15 @@ the VPN is running). Recreate the two stacks from the restored compose files, re
   `--include`/`--exclude` when `--target /`).
 - **Still unrehearsed:** zero-to-restored on *bare metal* (fresh box, nothing but the repo +
   the two passwords). The mechanism is proven; the from-scratch drill is the final check.
+- **The backup systemd unit had no `$HOME` — restic ran without a cache (2026-06-17 to
+  2026-09-17).** `pi-arr-backup.service` set no `Environment=HOME=` and no `User=`, so it had
+  no `$HOME` at all despite running as root (an interactive `sudo -u root env` check is **not**
+  representative — login shells set `$HOME`, bare systemd units don't). Restic silently fell
+  back to no local cache, re-pulling index/blob metadata from Drive on every run — backups
+  stretched from ~30–60 s to ~14–15 min, eventually pushing the nightly restart past the Kuma
+  maintenance window (caught 2026-09-17, see ISSUES.md #3). **Fixed:**
+  `Environment=HOME=/root` added to the unit; cache now persists at
+  `/root/.cache/restic/<repo-id>/`.
 ---
  
 ## Filesystem layout (on the single NVMe)
