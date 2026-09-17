@@ -191,3 +191,44 @@ workaround:
 
 ---
  
+## [x] 4. Nightly backup blew past the Kuma maintenance window (~15 min instead of ~30–60 s) — RESOLVED (2026-09-17): restic had no cache because the systemd unit never set `$HOME`
+
+**Seen (2026-09-16/17):** Kuma showed the seven arr/Jellyfin monitors going `Down` then `Up`
+a few minutes after the 03:55–04:25 maintenance window closed (04:27–04:28), two nights
+running. The Down→Up gap itself was a clean 60 s — matching the documented container
+stop/restart — but it was landing well outside the window, which is sized for the documented
+worst case (04:00 fire + up to 15 min `RandomizedDelaySec` + ~60 s downtime = done by ~04:16).
+
+**Root cause:** `journalctl -u pi-arr-backup.service` showed `unable to open cache: unable to
+locate cache directory: neither $XDG_CACHE_HOME nor $HOME are defined` on every run. The unit
+had no `Environment=HOME=...` and no `User=`, so — despite running as root — it had **no
+`$HOME` at all**; an interactive `sudo -u root env` check looked fine (`HOME=/root`) because a
+login shell sets it, which is not representative of what a bare systemd unit sees. Without a
+cache directory, restic re-fetched index/blob metadata from the remote repo on every run
+instead of reading it locally, turning a normally sub-minute backup into ~14–15 minutes
+(confirmed: `processed 1860 files, 450 MiB in 14:49` and `14:29` on the two affected nights,
+vs `0:33` for a similar-sized set once fixed). The `forget --prune` step hit the same problem
+harder — `running prune without a cache, this may be very slow!` — adding ~4 more minutes on
+`finding data that is still in use` on the cache-less run.
+
+**Fix (applied 2026-09-17):** added `Environment=HOME=/root` to
+`/etc/systemd/system/pi-arr-backup.service`, then `sudo systemctl daemon-reload`. **Verified:**
+`/root/.cache/restic/<repo-id>/` now exists and persists between runs; a same-size backup ran
+in 0:33 instead of ~15 min; both the cache-missing and no-cache-prune warnings are gone.
+
+**Also observed, banked, not fully explained:** at service teardown, systemd logs `Killing
+process <pid> (rclone) with signal SIGKILL` for one or more leftover rclone processes after
+the script's own work is already done (`done` logged 1 s prior). Confirmed from restic's own
+docs: each `restic` invocation spawns exactly one `rclone serve restic --stdio` child over
+stdin/stdout, and normally "killing the restic command leaves no orphan" — so this shouldn't
+happen at all under the documented model. In practice: 3 processes killed on the cache-less
+run (heavier prune: 2055 blobs repacked, `3:57` index-scan), 1 on the cache-warm run (219
+blobs, <1 s). Correlates with prune workload size; restic's own issue tracker has open reports
+of the rclone backend occasionally leaving processes running past when restic exits. Both runs
+completed and reported `Deactivated successfully` with no restic errors — treated as a benign
+cleanup artifact, not a data-integrity risk. To pin it down precisely: `pgrep -af rclone`
+watched live (`watch -n1 'pgrep -af rclone'`) during a manual run would show whether it's a
+genuine shutdown race or something else.
+
+---
+
