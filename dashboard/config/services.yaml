@@ -94,3 +94,9 @@
           username: "{{HOMEPAGE_VAR_WUD_USER}}"
           password: "{{HOMEPAGE_VAR_WUD_PASS}}"
           fields: ["monitoring", "updates"]
+    
+    - UpSnap:
+        icon: upsnap.png
+        href: https://pi-arr.tailfdeecd.ts.net
+        description: Wake-on-LAN for bliss
+        siteMonitor: http://100.115.36.108:8090/api/health
