@@ -1,6 +1,6 @@
 # pi-arr — system inventory
  
-Reference snapshot of the media server as built. Last updated: 2026-09-07.
+Reference snapshot of the media server as built. Last updated: 2026-09-21.
 Secrets (VPN keys, app passwords/API keys) are intentionally **not** stored here — they
 live in the gluetun environment and each app's config volume.
  
@@ -57,7 +57,7 @@ Split into three separate `apt install --only-upgrade <explicit list>` passes, v
 each. Explicit lists mean **no `apt-mark hold` state** to set and later forget to clear.
  
 1. **Tailscale first.** `tailscaled` restarts, so run from `tmux` (or the LAN IP) or the SSH
-   session dies mid-dpkg. Expect **Kuma to flap**: all eight HTTP monitors probe
+   session dies mid-dpkg. Expect **Kuma to flap**: all nine HTTP monitors probe
    `100.115.36.108`, so `tailscale0` bouncing can fire alert emails — correct behaviour, not a
    fault; use a Kuma maintenance window to suppress. Doing this first re-establishes the remote
    path while nothing else is in flux. Verify `tailscale ip -4` is still `100.115.36.108` and
@@ -205,8 +205,6 @@ user-facing and stay **off** the VPN.
 - Image: `lscr.io/linuxserver/bazarr:latest`
 - `network_mode: "service:gluetun"`, PUID/PGID 1000
 - Volume: `/opt/arr/bazarr:/config`, `/data/media:/data/media`
-- Connected to Sonarr/Radarr. Language profile: Greek + English, **at least one**
-  required (cutoff satisfied by either), not both forced.
 - Connected to Sonarr/Radarr. One language profile: Greek + English, both required — 
   Cutoff left empty (no named "None" in this build; you deselect to clear it), so Bazarr never stops at one language and fetches both el + en. 
   Set as default for Series + Movies and reassigned to existing items. (2026-06-20: changed from "either satisfies.")
@@ -323,7 +321,7 @@ user-facing and stay **off** the VPN.
   — location-independent (survives the office→home move), and it's also how the VPN-gated apps
   are reached (they're published on the host by gluetun, so from here they're just host ports).
   Probe-verified against Jellyfin before building the rest.
-- **HTTP(s) monitors (8):**
+- **HTTP(s) monitors (9):**
   - Jellyfin → `:8096/health` · Jellyseerr → `:5055`
   - qBittorrent → `:8080` · Bazarr → `:6767`
   - Prowlarr → `:9696/ping` · Sonarr → `:8989/ping` · Radarr → `:7878/ping`
@@ -334,6 +332,11 @@ user-facing and stay **off** the VPN.
     maintenance window: WUD isn't on the backup stop list, so it rides through the 04:00
     backup running — suppressing it would mask real signal. Known limit, accepted: the probe
     catches the container being down, not WUD silently failing to *detect* updates.
+  - UpSnap → `:8090/api/health` (added 2026-09-21 — PocketBase's unauthenticated health
+    endpoint, returns `{"message":"API is healthy.","code":200,...}`). Reachable on the
+    Tailscale IP because UpSnap runs `network_mode: host` and binds `0.0.0.0:8090`. Retries 2;
+    on the published status page. **Not** in the backup maintenance window (UpSnap isn't on
+    the backup stop list).
   - **FlareSolverr (8191) excluded** — internal-only, never published, unreachable from
     outside gluetun's namespace; its health is implied by Prowlarr working.
 - **Per-monitor retries = 2** (v2 defaults *new* monitors to 0, so a single blip would fire an
@@ -474,9 +477,18 @@ live in `/opt/homepage`.
   9.0.2 upgrade locked its API behind mandatory auth, breaking the widget's prior no-credential
   call; same fix pattern as the other widgets: stack-env value in `dashboard`'s Environment
   variables **and** a matching line in the `homepage` service's `environment:` block, then the
-  `{{HOMEPAGE_VAR_*}}` reference here), Portainer as a link.  
+  `{{HOMEPAGE_VAR_*}}` reference here), Portainer as a link, and **UpSnap** (added 2026-09-21)
+  as a plain link tile: `icon: upsnap.png`, `href: https://pi-arr.tailfdeecd.ts.net` (the
+  `tailscale serve` URL), `siteMonitor: http://100.115.36.108:8090/api/health`. `siteMonitor`
+  (an HTTP probe of the app's own health endpoint) chosen over `ping` so the dot reflects
+  UpSnap itself, not merely the Pi. **No widget, no wake button — by decision:** Homepage
+  has no UpSnap widget and widgets are display-only (no action buttons); a link can't carry
+  the `Authorization` header UpSnap's wake API requires. A `customapi` status widget would
+  need a long-lived PocketBase impersonate token (non-renewable, silent expiry) — not worth a
+  credential for a status UpSnap's own page shows one tap away. Waking bliss = tile → UpSnap
+  UI → power button.  
 ### Kuma prerequisite
-- A single **published** Uptime Kuma status page backs the rollup tile: all monitors (8 HTTP + the
+- A single **published** Uptime Kuma status page backs the rollup tile: all monitors (9 HTTP + the
   `pi-arr gluetun (VPN)` Docker-Container monitor + the `pi-arr disk space` Push monitor) in one
   group; the tile reads that page via its slug.
 ---
@@ -491,6 +503,14 @@ repo yet.
  
 ### UpSnap
 - Image: `ghcr.io/seriousm4x/upsnap:5` — small SvelteKit/Go/PocketBase Wake-on-LAN web app.
+- **Running version: 5.6.0** (verified 2026-09-21 from the UpSnap UI). The image carries **no
+  OCI version label** — `docker image inspect … org.opencontainers.image.version` returns empty —
+  so read the version from UpSnap's own UI. **CVE-2026-49819 / GHSA-w4jr-728f-5jhq** (critical:
+  unauthenticated `POST /api/upsnap/init-superuser` lets anyone claim the *first* superuser on a
+  fresh install, then a device's `wake_cmd` runs `/bin/sh -c` as **root**; affects 4.4.1–5.3.5)
+  is patched in ≥5.4.0 — and was not exploitable here regardless, since the superuser was
+  created on day one (the hole only exists while no superuser exists). Lesson for any future
+  redeploy from an empty `pb_data`: create the superuser immediately.
 - `network_mode: host` — required; it needs to emit a genuine L2 broadcast for the magic
   packet, which bridge networking can't do.
 - `cap_add: NET_RAW`, `cap_drop: ALL` — NET_RAW is for its ping/nmap-based device status
@@ -522,9 +542,16 @@ repo yet.
   was being set up, and it turned out to be the better host regardless: already on bliss's LAN
   and on the tailnet with a stable IP, meaningfully more headroom than the Pi 3, and already
   Compose/Portainer-managed the same way as every other stack here.
-- Not yet added to Kuma, Homepage, or WUD's watch list explicitly — WUD's `WATCHBYDEFAULT`
-  should already be picking it up for image-update digests; Kuma/Homepage entries are optional
-  future additions, not done.
+- **Monitoring & dashboard (2026-09-21):** Kuma HTTP monitor `UpSnap` → `:8090/api/health`
+  (retries 2, on the published status page, not in the backup maintenance window) — see
+  **Stack: `monitoring`** → Uptime Kuma. Homepage: plain link tile in **Operations** with a
+  `siteMonitor` dot on the same endpoint — see **Stack: `dashboard`** → `services.yaml`. WUD's
+  `WATCHBYDEFAULT` picks it up for image-update digests with no extra config.
+- **Never put a PocketBase *superuser* token in any config** (Homepage env, scripts, etc.).
+  PocketBase's impersonate tokens can be long-lived, but a superuser one can do anything —
+  on UpSnap that includes setting a device's `wake_cmd`, i.e. root command execution. If a
+  token-based integration is ever wanted, use a dedicated **non-superuser** UpSnap user with
+  minimal device permissions, and note its expiry date (impersonate tokens are not renewable).
 ---
  
 ## Logging / log rotation (all containers)
@@ -693,7 +720,7 @@ the VPN is running). Recreate the two stacks from the restored compose files, re
   representative — login shells set `$HOME`, bare systemd units don't). Restic silently fell
   back to no local cache, re-pulling index/blob metadata from Drive on every run — backups
   stretched from ~30–60 s to ~14–15 min, eventually pushing the nightly restart past the Kuma
-  maintenance window (caught 2026-09-17, see ISSUES.md #3). **Fixed:**
+  maintenance window (caught 2026-09-17, see ISSUES.md #4). **Fixed:**
   `Environment=HOME=/root` added to the unit; cache now persists at
   `/root/.cache/restic/<repo-id>/`.
 ---
@@ -755,7 +782,7 @@ the VPN is running). Recreate the two stacks from the restored compose files, re
 | Uptime Kuma | 3001 | service up/down monitoring |
 | WUD | 3002 | image-update notifications (`monitoring` stack) |
 | FlareSolverr | 8191 | internal only (not published) |
-| UpSnap | 8090 | Wake-on-LAN relay for `bliss` (standalone `upsnap` stack); reached via `https://pi-arr.tailfdeecd.ts.net/` (tailscale serve), not the raw port |
+| UpSnap | 8090 | Wake-on-LAN relay for `bliss` (standalone `upsnap` stack); reached via `https://pi-arr.tailfdeecd.ts.net/` (tailscale serve), not the raw port. Health: `:8090/api/health` (Kuma + Homepage probe) |
  
 ---
  
@@ -798,4 +825,7 @@ the VPN is running). Recreate the two stacks from the restored compose files, re
   needed. (The former `pi-arr vpn exit` monitor's token was retired with that monitor on
   2026-06-22 — see **VPN exit check — retired**.)
 - **UpSnap superuser** — created via the one-time PocketBase setup link (see Stack: `upsnap`);
-  password chosen by George directly in the browser, not stored by Claude.
+  password chosen by George directly in the browser, not stored by Claude. No UpSnap/PocketBase
+  token is stored anywhere on the box (the Homepage tile and Kuma monitor both use the
+  unauthenticated `/api/health` endpoint) — by design; see the superuser-token warning under
+  Stack: `upsnap`.

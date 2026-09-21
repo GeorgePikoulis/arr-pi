@@ -73,8 +73,11 @@ Everything that touches the internet for downloading rides an always-on AirVPN t
 - Prefer graceful shutdowns/reboots (`sudo poweroff`) over pulling power — single NVMe
   holds OS + data, and unsafe shutdowns mid-write are the main avoidable risk.
 - Watch free space on the root disk; a runaway season-pack grab or forgotten seeding can
-  fill the partition the OS lives on. qBittorrent has a low-space pause guard; Glances and
-  Scrutiny show capacity and drive health.
+  fill the partition the OS lives on. The host `df` alert (WARN ≤ 90 G via Kuma, CRITICAL
+  ≤ 35 G via Kuma + msmtp) is the headroom detector. qBittorrent's pre-allocation makes an
+  oversized grab fail cleanly at add-time — it is **not** a free-space threshold guard (no
+  "pause below X" setting exists in qBittorrent; see roadmap #7). Glances and Scrutiny show
+  capacity and drive health.
 
 ## When updating these files
 
