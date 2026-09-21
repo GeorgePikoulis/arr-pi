@@ -8,6 +8,7 @@
 
 - Media:
     - Jellyfin:
+        icon: jellyfin.png
         href: http://100.115.36.108:8096
         description: Media playback
         siteMonitor: http://100.115.36.108:8096
@@ -19,6 +20,7 @@
           enableBlocks: true
           enableNowPlaying: true
     - Jellyseerr:
+        icon: jellyseerr.png
         href: http://100.115.36.108:5055
         description: Requests & discovery
         siteMonitor: http://100.115.36.108:5055
@@ -29,6 +31,7 @@
 
 - Acquisition:
     - qBittorrent:
+        icon: qbittorrent.png
         href: http://100.115.36.108:8080
         description: Torrent client (behind VPN)
         siteMonitor: http://100.115.36.108:8080
@@ -38,6 +41,7 @@
           username: {{HOMEPAGE_VAR_QBIT_USERNAME}}
           password: {{HOMEPAGE_VAR_QBIT_PASSWORD}}
     - Sonarr:
+        icon: sonarr.png
         href: http://100.115.36.108:8989
         description: TV automation (behind VPN)
         siteMonitor: http://100.115.36.108:8989
@@ -46,6 +50,7 @@
           url: http://100.115.36.108:8989
           key: {{HOMEPAGE_VAR_SONARR_KEY}}
     - Radarr:
+        icon: radarr.png
         href: http://100.115.36.108:7878
         description: Movie automation (behind VPN)
         siteMonitor: http://100.115.36.108:7878
@@ -54,18 +59,21 @@
           url: http://100.115.36.108:7878
           key: {{HOMEPAGE_VAR_RADARR_KEY}}
     - Prowlarr:
+        icon: prowlarr.png
         href: http://100.115.36.108:9696
         description: Indexers (behind VPN)
         # Plain link + status dot. NB: ping targets the host IP, so it confirms
         # the Pi is reachable, not the app itself (all apps share this host IP).
         ping: 100.115.36.108
     - Bazarr:
+        icon: bazarr.png
         href: http://100.115.36.108:6767
         description: Subtitles (behind VPN)
         ping: 100.115.36.108
 
 - Operations:
     - Uptime Kuma:
+        icon: uptime-kuma.png
         href: http://100.115.36.108:3001
         description: Service up/down rollup
         widget:
@@ -75,6 +83,7 @@
           slug: dashboard
           fields: ["up", "down", "uptime", "incident"]
     - Scrutiny:
+        icon: scrutiny.png
         href: http://100.115.36.108:8082
         description: NVMe SMART health
         siteMonitor: http://100.115.36.108:8082
@@ -82,19 +91,20 @@
           type: scrutiny
           url: http://100.115.36.108:8082
     - Portainer:
+        icon: portainer.png
         href: https://100.115.36.108:9443
         description: Container management
 
     - WUD:
+        icon: whats-up-docker.png
         href: http://100.115.36.108:3002
         description: What's up Docker, container updater
         widget:
           type: whatsupdocker
           url: http://100.115.36.108:3002
-          username: "{{HOMEPAGE_VAR_WUD_USER}}"
-          password: "{{HOMEPAGE_VAR_WUD_PASS}}"
+          username: {{HOMEPAGE_VAR_WUD_USER}}
+          password: {{HOMEPAGE_VAR_WUD_PASS}}
           fields: ["monitoring", "updates"]
-    
     - UpSnap:
         icon: upsnap.png
         href: https://pi-arr.tailfdeecd.ts.net
